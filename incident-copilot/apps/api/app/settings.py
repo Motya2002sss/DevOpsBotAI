@@ -1,6 +1,5 @@
 from pydantic_settings import BaseSettings
 
-
 class Settings(BaseSettings):
     database_url: str
     redis_url: str
@@ -8,10 +7,12 @@ class Settings(BaseSettings):
     api_key: str = "change-me"
     webhook_token: str | None = None
 
+    bot_token: str | None = None
+    notify_chat_id: str | None = None
+
     class Config:
         env_prefix = ""
         case_sensitive = False
 
 
 settings = Settings()
-

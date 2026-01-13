@@ -1,6 +1,7 @@
 import os
 import requests
 import telebot
+import html
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 API_BASE_URL = os.getenv("API_BASE_URL", "http://api:8000")
@@ -23,6 +24,8 @@ def start(m):
         "Команды:\n"
         "/incident текст — создать инцидент\n"
         "/incidents — последние инциденты\n"
+        "/chatid — показать chat_id (для уведомлений)\n"
+        "/analyze id — AI-разбор инцидента\n"
     )
 
 
@@ -71,6 +74,61 @@ def list_incidents(m):
         )
     bot.reply_to(m, "\n\n".join(lines))
 
+@bot.message_handler(commands=["chatid"])
+def chatid(m):
+    bot.reply_to(m, f"chat_id: <code>{m.chat.id}</code>")
+@bot.message_handler(commands=["chatid"])
+def chatid(m):
+    bot.reply_to(m, f"chat_id: <code>{m.chat.id}</code>")
+
+
+@bot.message_handler(commands=["analyze"])
+def analyze_cmd(m):
+    try:
+        parts = m.text.split(" ", 1)
+        if len(parts) < 2 or not parts[1].strip():
+            bot.reply_to(m, "Пример: /analyze incident_id")
+            return
+
+        incident_id = parts[1].strip()
+
+        r = requests.post(
+            f"{API_BASE_URL}/incidents/{incident_id}/analyze",
+            headers=api_headers(),
+            timeout=20
+        )
+        if r.status_code >= 300:
+            bot.reply_to(m, f"Ошибка API: {r.status_code}\n{r.text}")
+            return
+
+        data = r.json()  # <-- ВАЖНО: data присваиваем ДО использования
+
+        safe_title = html.escape(str(data.get("title", "")))
+        safe_inc_id = html.escape(str(data.get("incident_id", "")))
+        safe_tldr = html.escape(str(data.get("tldr", "")))
+
+        hypotheses = data.get("hypotheses", []) or []
+        next_steps = data.get("next_steps", []) or []
+        questions = data.get("questions", []) or []
+
+        hyp_lines = "\n".join([f"• {html.escape(str(h))}" for h in hypotheses]) or "—"
+        step_lines = "\n".join([f"• <code>{html.escape(str(s))}</code>" for s in next_steps]) or "—"
+        q_lines = "\n".join([f"• {html.escape(str(q))}" for q in questions]) or "—"
+
+        text = (
+            f"🤖 <b>AI анализ</b>\n"
+            f"🧾 <b>Инцидент:</b> {safe_title}\n"
+            f"ID: <code>{safe_inc_id}</code>\n\n"
+            f"🧠 <b>TL;DR:</b> {safe_tldr}\n\n"
+            f"🧩 <b>Гипотезы:</b>\n{hyp_lines}\n\n"
+            f"🛠 <b>Следующие шаги:</b>\n{step_lines}\n\n"
+            f"❓ <b>Вопросы:</b>\n{q_lines}"
+        )
+
+        bot.reply_to(m, text)
+
+    except Exception as e:
+        # чтобы бот не падал “в целом” из-за одной ошибки
+        bot.reply_to(m, f"Ошибка в /analyze: {e}")
 
 bot.infinity_polling(timeout=30, long_polling_timeout=30)
-

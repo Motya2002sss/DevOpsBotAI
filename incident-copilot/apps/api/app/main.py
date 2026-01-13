@@ -1,5 +1,9 @@
 import uuid
+import html
 from typing import Annotated
+from app.tasks import enrich_incident, notify_telegram
+
+from app.ai import analyze_incident
 
 from fastapi import FastAPI, Depends, Header, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -107,5 +111,39 @@ async def webhook_alert(request: Request, db: Session = Depends(get_db), _: None
 
     crud.add_signal(db, inc.id, "alert", "webhook", body)
     incident_queue.enqueue(enrich_incident, str(inc.id))
+
+    safe_title = html.escape(str(title))
+    safe_sev = html.escape(str(severity))
+    msg = (
+        f"🚨 <b>Alert</b>\n"
+        f"<b>{safe_title}</b>\n"
+        f"severity: <b>{safe_sev}</b>\n"
+        f"incident: <code>{inc.id}</code>\n"
+        f"reused: <b>{'yes' if existing else 'no'}</b>"
+    )
+    incident_queue.enqueue(notify_telegram, msg)
+
     return {"ok": True, "incident_id": str(inc.id), "reused": bool(existing)}
+
+@app.post("/incidents/{incident_id}/analyze", dependencies=[Depends(require_api_key)])
+def analyze(incident_id: uuid.UUID, db: Session = Depends(get_db)):
+    inc = crud.get_incident(db, incident_id)
+    if not inc:
+        raise HTTPException(404, "Incident not found")
+
+    signals = crud.list_signals(db, incident_id)
+    signals_payload = [
+        {"type": s.type, "source": s.source, "timestamp": s.timestamp.isoformat(), "payload": s.payload}
+        for s in signals
+    ]
+
+    result = analyze_incident(inc.title, signals_payload)
+    return {
+        "incident_id": str(inc.id),
+        "title": inc.title,
+        "tldr": result.tldr,
+        "hypotheses": result.hypotheses,
+        "next_steps": result.next_steps,
+        "questions": result.questions,
+    }
 
